@@ -1,22 +1,30 @@
-# ============================
-#          CONFIG.PY
-# ============================
+# =========================
+#        CONFIG.PY
+# =========================
 
 BOT_TOKEN = "8437924316:AAFysR4_YGYr2HxhxLHWUVAJJdNHSXxNXns"
 
-# مدیر اصلی
-ADMINS = {5132329814}   # ID خودت
+# -------------------------
+#     ADMIN & MANAGER
+# -------------------------
+ADMINS = {9936543414}        # شماره شما بدون 98+
+MANAGERS = {9120000000}      # فعلاً تست – بعداً تغییر می‌دهی
 
-# واتساپ و اینستاگرام
-WHATSAPP_NUMBER = "989190432181"
-INSTAGRAM_URL = "https://instagram.com/tamara.clinic"   # تستی
-
-# نام کلینیک
+# -------------------------
+#   CLINIC INFORMATION
+# -------------------------
 CLINIC_NAME = "کلینیک زیبایی تمارا"
-CLINIC_ADDRESS = "دماوند - خیابان بهشتی"
+CLINIC_ADDRESS = "دماوند، خیابان بهشتی"
+WHATSAPP_NUMBER = "989190432181"
+INSTAGRAM_URL = "https://instagram.com/tamara_clinic"
 
-# شماره کارت پرداخت آفلاین
-CARD_NUMBER = "6037991234567890"
+# -------------------------
+#  CARD-TO-CARD PAYMENT
+# -------------------------
+CARD_NUMBER = "6037-9917-1234-5678"
 
-# Webhook URL — مخصوص Render
-WEBHOOK_URL = "https://tamara.onrender.com/webhook"
+# -------------------------
+#      NEXTPAY PAYMENT
+# -------------------------
+NEXTPAY_MERCHANT_ID = "test"
+CALLBACK_URL = "https://tamana.onrender.com/webhook"
