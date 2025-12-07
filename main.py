@@ -6,8 +6,9 @@ import os
 import asyncio
 from flask import Flask, request
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
@@ -30,7 +31,6 @@ from database import (
     create_tables,
     get_doctors,
     get_services,
-    create_appointment,
     get_appointments_today
 )
 
@@ -38,20 +38,20 @@ from datetime import datetime
 
 
 # ==========================================================
-#                     FLASK APP
+#               GLOBALS
 # ==========================================================
-
-WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL")
-if WEBHOOK_URL:
-    WEBHOOK_URL = WEBHOOK_URL.rstrip("/") + "/webhook"
 
 flask_app = Flask(__name__)
 
-tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
+# Loop اختصاصی برای پردازش Telegram
+bot_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(bot_loop)
+
+tg_app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
 
 
 # ==========================================================
-#                     BOT HANDLERS
+#               TELEGRAM HANDLERS
 # ==========================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -101,28 +101,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # تاریخ
+    # رزرو نوبت
     if data == "book_appointment":
         now = datetime.now()
-        msg = "📅 *انتخاب روز:*\n\n"
         buttons = []
-
         for i in range(7):
             d = now.replace(day=now.day + i)
             greg = d.strftime("%Y-%m-%d")
             j = jalali(d)
             buttons.append([InlineKeyboardButton(j, callback_data=f"day_{greg}")])
 
-        await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(buttons))
+        await query.edit_message_text(
+            "📅 انتخاب روز:",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
         return
 
     # انتخاب روز
     if data.startswith("day_"):
         context.user_data["selected_date"] = data.split("_")[1]
         await query.edit_message_text(
-            "⏰ *انتخاب ساعت:*",
-            reply_markup=time_keyboard(),
-            parse_mode="Markdown"
+            "⏰ انتخاب ساعت:",
+            reply_markup=time_keyboard()
         )
         return
 
@@ -130,31 +130,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("time_"):
         context.user_data["selected_time"] = data.split("_")[1]
         await query.edit_message_text(
-            "نوع پرداخت را انتخاب کنید:",
+            "نوع پرداخت:",
             reply_markup=payment_keyboard()
         )
         return
 
     # پرداخت آنلاین
     if data == "pay_online":
-        await query.edit_message_text(
-            "💳 لینک پرداخت آنلاین در نسخه بعدی فعال می‌شود."
-        )
+        await query.edit_message_text("💳 در نسخه بعدی فعال می‌شود.")
         return
 
     # کارت‌به‌کارت
     if data == "pay_offline":
-        await query.edit_message_text(
-            card_to_card_text(),
-            parse_mode="Markdown"
-        )
+        await query.edit_message_text(card_to_card_text(), parse_mode="Markdown")
         return
 
     # پنل مدیریت
     if data == "admin_panel":
         today = get_appointments_today()
         text = "📋 *نوبت‌های امروز:*\n\n"
-
         if not today:
             text += "هیچ نوبتی ثبت نشده."
         else:
@@ -165,47 +159,58 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-# ==========================================================
-#    دریافت عکس رسید کارت‌به‌کارت
-# ==========================================================
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("رسید دریافت شد. نوبت شما ثبت شد. 🌸")
+    await update.message.reply_text("رسید دریافت شد 🌸")
 
 
 # ==========================================================
-#               FLASK WEBHOOK ROUTE
+#               WEBHOOK ROUTE
 # ==========================================================
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, tg_app.bot)
-    asyncio.create_task(tg_app.process_update(update))
-    return "OK", 200
+    try:
+        data = request.get_json(force=True)
+        update = Update.de_json(data, tg_app.bot)
+
+        # اجرای update در event loop اختصاصی
+        asyncio.run_coroutine_threadsafe(
+            tg_app.process_update(update),
+            bot_loop
+        )
+
+        return "OK", 200
+    except Exception as e:
+        print("Webhook ERROR:", e)
+        return "ERROR", 500
 
 
 # ==========================================================
-#                     RUN BOT
+#               START BOT + FLASK
 # ==========================================================
 
-async def run_bot():
+def start_bot():
     create_tables()
 
-    if WEBHOOK_URL:
-        await tg_app.bot.set_webhook(WEBHOOK_URL)
-        print("Webhook set:", WEBHOOK_URL)
+    # ثبت وبهوک
+    external = os.environ.get("RENDER_EXTERNAL_URL")
+    if external:
+        url = external.rstrip("/") + "/webhook"
+        bot_loop.run_until_complete(tg_app.bot.set_webhook(url))
+        print("Webhook set:", url)
 
+    # هندلرها
     tg_app.add_handler(CommandHandler("start", start))
     tg_app.add_handler(CallbackQueryHandler(handle_callback))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    print("Bot is running via Webhook...")
-
-    await asyncio.get_event_loop().run_in_executor(
-        None, flask_app.run, "0.0.0.0", 10000
-    )
+    # اجرای bot در loop جدا
+    bot_loop.create_task(tg_app.initialize())
+    bot_loop.create_task(tg_app.start())
 
 
+# اجرای Flask و Loop
 if __name__ == "__main__":
-    asyncio.run(run_bot())
+    start_bot()
+    flask_app.run(host="0.0.0.0", port=10000)
