@@ -6,7 +6,7 @@ import os
 import asyncio
 from flask import Flask, request
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -37,8 +37,6 @@ from database import (
 from datetime import datetime
 
 
-
-
 # ==========================================================
 #                     FLASK APP
 # ==========================================================
@@ -47,13 +45,9 @@ WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL")
 if WEBHOOK_URL:
     WEBHOOK_URL = WEBHOOK_URL.rstrip("/") + "/webhook"
 
-
 flask_app = Flask(__name__)
 
 tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-
-
 
 
 # ==========================================================
@@ -73,15 +67,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-
-
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     user_id = query.from_user.id
     await query.answer()
 
-    # ---------------------- بازگشت ----------------------
+    # بازگشت
     if data == "back_main":
         await query.edit_message_text(
             "منوی اصلی:",
@@ -89,7 +81,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ---------------------- پزشکان ----------------------
+    # پزشکان
     if data == "show_doctors":
         docs = get_doctors()
         await query.edit_message_text(
@@ -99,7 +91,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ---------------------- خدمات ----------------------
+    # خدمات
     if data == "show_services":
         srv = get_services()
         await query.edit_message_text(
@@ -109,8 +101,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ---------------------- تاریخ ----------------------
-    if data == "book":
+    # تاریخ
+    if data == "book_appointment":
         now = datetime.now()
         msg = "📅 *انتخاب روز:*\n\n"
         buttons = []
@@ -124,7 +116,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # ---------------------- انتخاب روز ----------------------
+    # انتخاب روز
     if data.startswith("day_"):
         context.user_data["selected_date"] = data.split("_")[1]
         await query.edit_message_text(
@@ -134,24 +126,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ---------------------- انتخاب ساعت ----------------------
+    # انتخاب ساعت
     if data.startswith("time_"):
         context.user_data["selected_time"] = data.split("_")[1]
-
         await query.edit_message_text(
             "نوع پرداخت را انتخاب کنید:",
             reply_markup=payment_keyboard()
         )
         return
 
-    # ---------------------- پرداخت آنلاین ----------------------
+    # پرداخت آنلاین
     if data == "pay_online":
         await query.edit_message_text(
-            "💳 لینک پرداخت آنلاین در نسخه بعدی فعال می‌شود.\n\nفعلاً از کارت‌به‌کارت استفاده کنید."
+            "💳 لینک پرداخت آنلاین در نسخه بعدی فعال می‌شود."
         )
         return
 
-    # ---------------------- کارت به کارت ----------------------
+    # کارت‌به‌کارت
     if data == "pay_offline":
         await query.edit_message_text(
             card_to_card_text(),
@@ -159,7 +150,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ---------------------- پنل مدیریت ----------------------
+    # پنل مدیریت
     if data == "admin_panel":
         today = get_appointments_today()
         text = "📋 *نوبت‌های امروز:*\n\n"
@@ -174,38 +165,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-
-
 # ==========================================================
-#                  HANDLE PHOTO (رسید کارت)
+#    دریافت عکس رسید کارت‌به‌کارت
 # ==========================================================
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    await update.message.reply_text(
-        "رسید دریافت شد. نوبت شما ثبت شد. 🌸"
-    )
-
-
+    await update.message.reply_text("رسید دریافت شد. نوبت شما ثبت شد. 🌸")
 
 
 # ==========================================================
-#                  FLASK WEBHOOK ROUTE
+#               FLASK WEBHOOK ROUTE
 # ==========================================================
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    if request.method == "POST":
-        data = request.get_json(force=True)
-        update = Update.de_json(data, tg_app.bot)
-        asyncio.create_task(tg_app.process_update(update))
-        return "OK", 200
-
-
+    data = request.get_json(force=True)
+    update = Update.de_json(data, tg_app.bot)
+    asyncio.create_task(tg_app.process_update(update))
+    return "OK", 200
 
 
 # ==========================================================
-#                  INIT + MAIN
+#                     RUN BOT
 # ==========================================================
 
 async def run_bot():
@@ -219,11 +200,11 @@ async def run_bot():
     tg_app.add_handler(CallbackQueryHandler(handle_callback))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    print("Bot is running on Webhook...")
+    print("Bot is running via Webhook...")
 
-    # Flask را نگه می‌دارد
-    await asyncio.get_event_loop().run_in_executor(None, flask_app.run, "0.0.0.0", 10000)
-
+    await asyncio.get_event_loop().run_in_executor(
+        None, flask_app.run, "0.0.0.0", 10000
+    )
 
 
 if __name__ == "__main__":
