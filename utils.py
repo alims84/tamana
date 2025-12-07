@@ -1,38 +1,28 @@
-import jdatetime
+
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+import jdatetime
 from config import WHATSAPP_NUMBER, INSTAGRAM_URL, CARD_NUMBER
 
-
-def jalali(dt):
-    j = jdatetime.date.fromgregorian(date=dt.date())
-    wd = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"][j.weekday()]
-    return f"{j.strftime('%Y/%m/%d')} - {wd}"
-
-
-def main_menu_keyboard(is_admin=False):
-    rows = []
+def main_menu_keyboard(is_admin):
+    buttons = []
 
     if is_admin:
-        rows.append([InlineKeyboardButton("⚙️ پنل مدیریت", callback_data="admin_panel")])
+        buttons.append([InlineKeyboardButton("⚙️ پنل مدیریت", callback_data="admin_panel")])
 
-    rows += [
-        [InlineKeyboardButton("📅 رزرو نوبت", callback_data="book")],
-        [InlineKeyboardButton("👨‍⚕️ پزشکان", callback_data="show_doctors")],
-        [InlineKeyboardButton("🧴 خدمات", callback_data="show_services")],
-        [InlineKeyboardButton("ℹ️ درباره کلینیک", callback_data="about_clinic")],
-        [InlineKeyboardButton("📞 واتساپ", url=f"https://wa.me/{WHATSAPP_NUMBER}")],
-        [InlineKeyboardButton("📷 اینستاگرام", url=INSTAGRAM_URL)],
-    ]
+    buttons.append([InlineKeyboardButton("📅 رزرو نوبت", callback_data="book")])
+    buttons.append([InlineKeyboardButton("👨‍⚕️ پزشکان", callback_data="show_doctors")])
+    buttons.append([InlineKeyboardButton("🧴 خدمات", callback_data="show_services")])
+    buttons.append([InlineKeyboardButton("ℹ️ درباره کلینیک", callback_data="about")])
+    buttons.append([InlineKeyboardButton("📞 واتساپ", url=f"https://wa.me/{WHATSAPP_NUMBER}")])
+    buttons.append([InlineKeyboardButton("📷 اینستاگرام", url=INSTAGRAM_URL)])
 
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup(buttons)
 
 
-def doctor_keyboard(doctors):
+def doctor_keyboard(docs):
     rows = []
-    for d in doctors:
-        rows.append([
-            InlineKeyboardButton(f"{d[1]} — {d[2]}", callback_data=f"doc_{d[0]}")
-        ])
+    for d in docs:
+        rows.append([InlineKeyboardButton(f"{d[1]} — {d[2]}", callback_data=f"doc_{d[0]}")])
     rows.append([InlineKeyboardButton("⬅ بازگشت", callback_data="back_main")])
     return InlineKeyboardMarkup(rows)
 
@@ -47,24 +37,34 @@ def services_keyboard(items):
 
 def time_keyboard():
     rows = []
-    row = []
-    for h in range(9, 21):
-        row.append(InlineKeyboardButton(f"{h:02d}:00", callback_data=f"time_{h:02d}:00"))
-        if len(row) == 4:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
+    for h in range(9, 18):
+        rows.append([InlineKeyboardButton(f"{h}:00", callback_data=f"time_{h}:00")])
+    rows.append([InlineKeyboardButton("⬅ بازگشت", callback_data="back_main")])
     return InlineKeyboardMarkup(rows)
 
 
 def payment_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 پرداخت آنلاین", callback_data="pay_online")],
-        [InlineKeyboardButton("🏦 کارت به کارت", callback_data="pay_offline")],
-        [InlineKeyboardButton("⬅ بازگشت", callback_data="back_main")],
+        [InlineKeyboardButton("🏦 کارت‌به‌کارت", callback_data="pay_offline")],
+        [InlineKeyboardButton("⬅ بازگشت", callback_data="back_main")]
     ])
 
 
 def card_to_card_text():
-    return f"💳 *پرداخت کارت‌به‌کارت*\n\nشماره کارت:\n`{CARD_NUMBER}`\n\nبعد از واریز رسید را ارسال کنید."
+    return (
+        "💳 *پرداخت کارت‌به‌کارت*
+
+"
+        f"شماره کارت:
+`{CARD_NUMBER}`
+
+"
+        "بعد از واریز، عکس رسید ارسال شود."
+    )
+
+
+def jalali(dt):
+    j = jdatetime.date.fromgregorian(date=dt.date())
+    wd = ["دوشنبه","سه‌شنبه","چهارشنبه","پنجشنبه","جمعه","شنبه","یکشنبه"][j.weekday()]
+    return f"{j.strftime('%Y/%m/%d')} - {wd}"
