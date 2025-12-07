@@ -1,18 +1,14 @@
-# ===============================
-#          MAIN.PY — RENDER
-# ===============================
+# ================================================
+#             MAIN.PY — RENDER WEBHOOK
+# ================================================
 
 import os
-import asyncio
-from flask import Flask, request
-
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
-    Application,
-    ApplicationBuilder,
-    ContextTypes,
-    CommandHandler,
-    CallbackQueryHandler,
+    ApplicationBuilder, 
+    ContextTypes, 
+    CommandHandler, 
+    CallbackQueryHandler, 
     MessageHandler,
     filters
 )
@@ -37,21 +33,13 @@ from database import (
 from datetime import datetime
 
 
-# ==========================================================
-#               GLOBALS
-# ==========================================================
-
-flask_app = Flask(__name__)
-
-# Loop اختصاصی برای پردازش Telegram
-bot_loop = asyncio.new_event_loop()
-asyncio.set_event_loop(bot_loop)
-
-tg_app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL")
+if WEBHOOK_URL:
+    WEBHOOK_URL = WEBHOOK_URL.rstrip("/") + "/webhook"
 
 
 # ==========================================================
-#               TELEGRAM HANDLERS
+#                      BOT HANDLERS
 # ==========================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,8 +50,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🌸 خوش آمدید به *{CLINIC_NAME}*\n\n"
         f"🏥 آدرس: {CLINIC_ADDRESS}\n\n"
         "لطفاً یک گزینه را انتخاب کنید:",
+        parse_mode="Markdown",
         reply_markup=main_menu_keyboard(is_admin),
-        parse_mode="Markdown"
     )
 
 
@@ -86,8 +74,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         docs = get_doctors()
         await query.edit_message_text(
             "👨‍⚕️ *لیست پزشکان:*",
-            reply_markup=doctor_keyboard(docs),
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=doctor_keyboard(docs)
         )
         return
 
@@ -96,12 +84,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         srv = get_services()
         await query.edit_message_text(
             "🧴 *خدمات کلینیک:*",
-            reply_markup=services_keyboard(srv),
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=services_keyboard(srv)
         )
         return
 
-    # رزرو نوبت
+    # شروع رزرو
     if data == "book_appointment":
         now = datetime.now()
         buttons = []
@@ -117,9 +105,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # انتخاب روز
+    # انتخاب تاریخ
     if data.startswith("day_"):
-        context.user_data["selected_date"] = data.split("_")[1]
+        context.user_data["date"] = data.split("_")[1]
         await query.edit_message_text(
             "⏰ انتخاب ساعت:",
             reply_markup=time_keyboard()
@@ -128,9 +116,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # انتخاب ساعت
     if data.startswith("time_"):
-        context.user_data["selected_time"] = data.split("_")[1]
+        context.user_data["time"] = data.split("_")[1]
         await query.edit_message_text(
-            "نوع پرداخت:",
+            "روش پرداخت:",
             reply_markup=payment_keyboard()
         )
         return
@@ -140,77 +128,61 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("💳 در نسخه بعدی فعال می‌شود.")
         return
 
-    # کارت‌به‌کارت
     if data == "pay_offline":
-        await query.edit_message_text(card_to_card_text(), parse_mode="Markdown")
+        await query.edit_message_text(
+            card_to_card_text(), parse_mode="Markdown"
+        )
         return
 
     # پنل مدیریت
     if data == "admin_panel":
         today = get_appointments_today()
-        text = "📋 *نوبت‌های امروز:*\n\n"
+        txt = "📋 *نوبت‌های امروز:*\n\n"
         if not today:
-            text += "هیچ نوبتی ثبت نشده."
+            txt += "❌ نوبتی ثبت نشده"
+
         else:
             for t in today:
-                text += f"👨‍⚕️ {t[0]} | 🧴 {t[1]} | ⏰ {t[2]}\n"
+                txt += f"👨‍⚕️ {t[0]} | 🧴 {t[1]} | ⏰ {t[2]}\n"
 
-        await query.edit_message_text(text, parse_mode="Markdown")
+        await query.edit_message_text(txt, parse_mode="Markdown")
         return
 
 
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("رسید دریافت شد 🌸")
 
 
 # ==========================================================
-#               WEBHOOK ROUTE
+#                      RUN BOT
 # ==========================================================
 
-@flask_app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        data = request.get_json(force=True)
-        update = Update.de_json(data, tg_app.bot)
+async def setup():
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .webhook_url(WEBHOOK_URL)
+        .build()
+    )
 
-        # اجرای update در event loop اختصاصی
-        asyncio.run_coroutine_threadsafe(
-            tg_app.process_update(update),
-            bot_loop
-        )
-
-        return "OK", 200
-    except Exception as e:
-        print("Webhook ERROR:", e)
-        return "ERROR", 500
-
-
-# ==========================================================
-#               START BOT + FLASK
-# ==========================================================
-
-def start_bot():
     create_tables()
 
-    # ثبت وبهوک
-    external = os.environ.get("RENDER_EXTERNAL_URL")
-    if external:
-        url = external.rstrip("/") + "/webhook"
-        bot_loop.run_until_complete(tg_app.bot.set_webhook(url))
-        print("Webhook set:", url)
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
 
-    # هندلرها
-    tg_app.add_handler(CommandHandler("start", start))
-    tg_app.add_handler(CallbackQueryHandler(handle_callback))
-    tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    print("✔ Webhook فعال شد:", WEBHOOK_URL)
+    await app.initialize()
+    await app.start()
+    await app.updater.start_webhook(
+        listen="0.0.0.0",
+        port=10000,
+        url_path="webhook",
+        webhook_url=WEBHOOK_URL,
+    )
+    await app.run_polling()
 
-    # اجرای bot در loop جدا
-    bot_loop.create_task(tg_app.initialize())
-    bot_loop.create_task(tg_app.start())
 
-
-# اجرای Flask و Loop
 if __name__ == "__main__":
-    start_bot()
-    flask_app.run(host="0.0.0.0", port=10000)
+    import asyncio
+    asyncio.run(setup())
