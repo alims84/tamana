@@ -1,152 +1,93 @@
-# ============================
-#         MAIN.PY
-# ============================
-
-import logging
 import asyncio
-import datetime
 from flask import Flask, request
-
 from telegram import Update
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes
+    ApplicationBuilder, CallbackQueryHandler,
+    CommandHandler, ContextTypes
 )
+from config import BOT_TOKEN, ADMIN_IDS, WEBHOOK_URL
+from database import *
+from utils import *
+from datetime import datetime
 
-from config import BOT_TOKEN, ADMINS
-from database import (
-    create_tables,
-    get_doctors,
-    get_services,
-    add_appointment
-)
-from utils import (
-    main_menu_keyboard,
-    doctors_keyboard,
-    services_keyboard,
-    payment_keyboard,
-    card_to_card_text,
-    to_jalali
-)
-
-# ------------------ LOGGING ------------------
-
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
-
-
-# ------------------ FLASK FOR WEBHOOK ------------------
+create_tables()
 
 app = Flask(__name__)
-tg_app = None
+
+tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 
-@app.post("/webhook")
-async def telegram_webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, tg_app.bot)
-    await tg_app.process_update(update)
-    return "OK", 200
-
-
-# ------------------ START ------------------
-
+# -----------------------
+# /start
+# -----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    is_admin = user_id in ADMINS
+    user = update.effective_user
+    is_admin = user.id in ADMIN_IDS
 
     await update.message.reply_text(
-        f"سلام {update.effective_user.first_name} 🌸",
+        f"سلام {user.first_name} 🌸",
         reply_markup=main_menu_keyboard(is_admin)
     )
 
 
-# ------------------ CALLBACKS ------------------
+# -----------------------
+# دکمه‌ها
+# -----------------------
+async def buttons(update: Update, context):
+    q = update.callback_query
+    data = q.data
+    await q.answer()
 
-async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data
-    await query.answer()
-
-    # ----- BACK -----
+    # برگشت
     if data == "back_main":
-        is_admin = query.from_user.id in ADMINS
-        await query.edit_message_text(
+        return await q.message.edit_text(
             "منوی اصلی:",
-            reply_markup=main_menu_keyboard(is_admin)
+            reply_markup=main_menu_keyboard(q.from_user.id in ADMIN_IDS)
         )
-        return
 
-    # ----- DOCTORS -----
+    # پزشکان
     if data == "doctors":
-        docs = get_doctors()
-        await query.edit_message_text(
+        return await q.message.edit_text(
             "لیست پزشکان:",
-            reply_markup=doctors_keyboard(docs)
+            reply_markup=doctor_keyboard(get_doctors())
         )
-        return
 
-    # ----- SERVICES -----
+    # خدمات
     if data == "services":
-        items = get_services()
-        await query.edit_message_text(
+        return await q.message.edit_text(
             "لیست خدمات:",
-            reply_markup=services_keyboard(items)
+            reply_markup=services_keyboard(get_services())
         )
-        return
 
-    # ----- ABOUT -----
+    # درباره
     if data == "about":
-        await query.edit_message_text(
-            "کلینیک زیبایی تمارا\nبهترین خدمات زیبایی ✨",
-            reply_markup=main_menu_keyboard(query.from_user.id in ADMINS)
-        )
-        return
+        return await q.message.edit_text("کلینیک زیبایی تامارا ✨")
 
-    # ----- PAYMENT -----
-    if data == "pay_manual":
-        await query.edit_message_text(
-            card_to_card_text(),
-            reply_markup=payment_keyboard()
-        )
-        return
+    # ادمین
+    if data == "admin_panel":
+        return await q.message.edit_text("⚙️ پنل مدیریت", reply_markup=None)
 
 
-# ------------------ RUN BOT ------------------
+# -----------------------
+# Webhook Handler
+# -----------------------
+@app.post("/webhook")
+def webhook():
+    update = Update.de_json(request.get_json(force=True), tg_app.bot)
+    asyncio.get_event_loop().create_task(tg_app.process_update(update))
+    return "OK"
 
+
+# -----------------------
+# اجرای ربات
+# -----------------------
 async def run_bot():
-    global tg_app
-
-    create_tables()
-
-    tg_app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    tg_app.add_handler(CommandHandler("start", start))
-    tg_app.add_handler(CallbackQueryHandler(callbacks))
-
-    # Set webhook
-    await tg_app.bot.set_webhook("https://tamana.onrender.com/webhook")
-
-    log.info("Bot is running (Webhook)...")
+    await tg_app.initialize()
     await tg_app.start()
-    await tg_app.updater.start_polling()  # required fix on render
+    await tg_app.bot.set_webhook(WEBHOOK_URL)
+    print("Bot is running via Webhook...")
 
-
-# ------------------ FLASK SERVER ------------------
-
-def run_flask():
-    app.run(host="0.0.0.0", port=10000)
-
-
-# ------------------ ENTRY ------------------
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(run_bot())
-    run_flask()
+    asyncio.get_event_loop().run_until_complete(run_bot())
+    app.run(host="0.0.0.0", port=10000)
