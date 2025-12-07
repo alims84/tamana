@@ -104,3 +104,4 @@ def get_appointments_today(jalali_date):
     cur.execute("SELECT * FROM appointments WHERE date_jalali = ?", (jalali_date,))
     data = cur.fetchall()
     con.close()
+    return data
