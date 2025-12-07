@@ -113,12 +113,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
+
     update = Update.de_json(data, tg_app.bot)
 
-    # ارسال update به event-loop اصلی
-    loop.call_soon_threadsafe(asyncio.create_task, tg_app.process_update(update))
+    # اجرای آپدیت داخل event loop خود اپلیکیشن
+    asyncio.run(tg_app.process_update(update))
 
     return "OK", 200
+
 
 
 # ==========================================================
