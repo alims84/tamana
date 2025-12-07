@@ -1,19 +1,20 @@
-# ================================================
-#      MAIN.PY — RENDER (PTB 20.x COMPATIBLE)
-# ================================================
+
+# ===============================================
+#                MAIN.PY  (Render Webhook)
+# ===============================================
 
 import os
 import asyncio
+from flask import Flask, request
 from datetime import datetime
-
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     ApplicationBuilder,
-    ContextTypes,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters,
+    ContextTypes,
+    filters
 )
 
 from config import BOT_TOKEN, ADMINS, CLINIC_NAME, CLINIC_ADDRESS
@@ -30,32 +31,38 @@ from database import (
     create_tables,
     get_doctors,
     get_services,
+    create_appointment,
     get_appointments_today
 )
 
-# ================================
-#         WEBHOOK URL
-# ================================
+
+# =====================================================
+#               FLASK + TELEGRAM APP
+# =====================================================
+
+flask_app = Flask(__name__)
 
 WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL")
 if WEBHOOK_URL:
     WEBHOOK_URL = WEBHOOK_URL.rstrip("/") + "/webhook"
 
+tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# ================================
-#         HANDLERS
-# ================================
+
+# =====================================================
+#                 BOT HANDLERS
+# =====================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     is_admin = user_id in ADMINS
 
     await update.message.reply_text(
-        f"🌸 خوش آمدید به *{CLINIC_NAME}*\n\n"
-        f"🏥 آدرس: {CLINIC_ADDRESS}\n\n"
+        f"🌸 خوش آمدید به *{CLINIC_NAME}*\n"
+        f"🏥 {CLINIC_ADDRESS}\n\n"
         "لطفاً یک گزینه را انتخاب کنید:",
-        parse_mode="Markdown",
-        reply_markup=main_menu_keyboard(is_admin)
+        reply_markup=main_menu_keyboard(is_admin),
+        parse_mode="Markdown"
     )
 
 
@@ -63,9 +70,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     user_id = query.from_user.id
-
     await query.answer()
 
+    # ------------------ بازگشت ------------------
     if data == "back_main":
         await query.edit_message_text(
             "منوی اصلی:",
@@ -73,59 +80,64 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ------------------ پزشکان ------------------
     if data == "show_doctors":
         docs = get_doctors()
         await query.edit_message_text(
             "👨‍⚕️ *لیست پزشکان:*",
-            parse_mode="Markdown",
-            reply_markup=doctor_keyboard(docs)
+            reply_markup=doctor_keyboard(docs),
+            parse_mode="Markdown"
         )
         return
 
+    # ------------------ خدمات ------------------
     if data == "show_services":
         srv = get_services()
         await query.edit_message_text(
-            "🧴 *خدمات کلینیک:*",
-            parse_mode="Markdown",
-            reply_markup=services_keyboard(srv)
+            "🧴 *خدمات:*",
+            reply_markup=services_keyboard(srv),
+            parse_mode="Markdown"
         )
         return
 
-    if data == "book_appointment":
+    # ------------------ رزرو - انتخاب تاریخ ------------------
+    if data == "book":
         now = datetime.now()
         buttons = []
         for i in range(7):
             d = now.replace(day=now.day + i)
             greg = d.strftime("%Y-%m-%d")
-            j = jalali(d)
-            buttons.append([InlineKeyboardButton(j, callback_data=f"day_{greg}")])
+            buttons.append([InlineKeyboardButton(jalali(d), callback_data=f"day_{greg}")])
 
         await query.edit_message_text(
-            "📅 روز موردنظر را انتخاب کنید:",
+            "📅 لطفاً تاریخ را انتخاب کنید:",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
         return
 
+    # ------------------ انتخاب ساعت ------------------
     if data.startswith("day_"):
-        context.user_data["date"] = data.split("_")[1]
+        context.user_data["selected_date"] = data.split("_")[1]
         await query.edit_message_text(
-            "⏰ انتخاب ساعت:",
+            "⏰ لطفاً ساعت نوبت را انتخاب کنید:",
             reply_markup=time_keyboard()
         )
         return
 
     if data.startswith("time_"):
-        context.user_data["time"] = data.split("_")[1]
+        context.user_data["selected_time"] = data.split("_")[1]
         await query.edit_message_text(
-            "روش پرداخت:",
+            "روش پرداخت را انتخاب کنید:",
             reply_markup=payment_keyboard()
         )
         return
 
+    # ------------------ پرداخت آنلاین ------------------
     if data == "pay_online":
-        await query.edit_message_text("💳 پرداخت آنلاین در نسخه بعدی فعال می‌شود.")
+        await query.edit_message_text("💳 پرداخت آنلاین به‌زودی فعال می‌شود.")
         return
 
+    # ------------------ کارت‌به‌کارت ------------------
     if data == "pay_offline":
         await query.edit_message_text(
             card_to_card_text(),
@@ -133,47 +145,58 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ------------------ پنل مدیریت ------------------
     if data == "admin_panel":
-        rows = get_appointments_today()
+        today = get_appointments_today()
         text = "📋 *نوبت‌های امروز:*\n\n"
-        if not rows:
-            text += "❌ نوبتی ثبت نشده."
+
+        if not today:
+            text += "⚠️ هیچ نوبتی ثبت نشده است."
         else:
-            for r in rows:
-                text += f"👨‍⚕️ {r[0]} | 🧴 {r[1]} | ⏰ {r[2]}\n"
+            for t in today:
+                text += f"👨‍⚕️ {t[0]} | 🧴 {t[1]} | ⏰ {t[2]}\n"
 
         await query.edit_message_text(text, parse_mode="Markdown")
         return
 
 
+
+# ------------------ رسید کارت به کارت ------------------
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("رسید دریافت شد 🌸")
+    await update.message.reply_text("رسید دریافت شد. نوبت شما تأیید شد 🌸")
 
 
-# ================================
-#        START WEBHOOK BOT
-# ================================
+# =====================================================
+#                WEBHOOK ENDPOINT
+# =====================================================
 
-async def main():
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json()
+    update = Update.de_json(data, tg_app.bot)
+    asyncio.run(tg_app.process_update(update))
+    return "OK", 200
+
+
+# =====================================================
+#                   START BOT
+# =====================================================
+
+async def run_bot():
     create_tables()
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    if WEBHOOK_URL:
+        await tg_app.bot.set_webhook(WEBHOOK_URL)
+        print("Webhook OK:", WEBHOOK_URL)
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    tg_app.add_handler(CommandHandler("start", start))
+    tg_app.add_handler(CallbackQueryHandler(handle_callback))
+    tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    print("🚀 Setting Webhook:", WEBHOOK_URL)
-    await app.bot.set_webhook(WEBHOOK_URL)
-
-    print("✔ Webhook فعال شد. Listening on port 10000…")
-
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=10000,
-        url_path="webhook"
-    )
+    print("BOT READY ON WEBHOOK...")
+    flask_app.run(host="0.0.0.0", port=10000)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_bot())
