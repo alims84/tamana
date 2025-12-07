@@ -1,129 +1,152 @@
-import os
+# ============================
+#         MAIN.PY
+# ============================
+
+import logging
 import asyncio
+import datetime
 from flask import Flask, request
+
 from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
+    ContextTypes
 )
-from config import BOT_TOKEN
-from utils import main_menu_keyboard
+
+from config import BOT_TOKEN, ADMINS
 from database import (
+    create_tables,
     get_doctors,
     get_services,
+    add_appointment
+)
+from utils import (
+    main_menu_keyboard,
+    doctors_keyboard,
+    services_keyboard,
+    payment_keyboard,
+    card_to_card_text,
+    to_jalali
 )
 
-# ---------------------------
-# FLASK APP  (Render Webhook)
-# ---------------------------
+# ------------------ LOGGING ------------------
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+
+# ------------------ FLASK FOR WEBHOOK ------------------
 
 app = Flask(__name__)
-telegram_app = None   # در ادامه مقداردهی می‌شود
+tg_app = None
 
 
-# ---------------------------
-#   COMMANDS
-# ---------------------------
+@app.post("/webhook")
+async def telegram_webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, tg_app.bot)
+    await tg_app.process_update(update)
+    return "OK", 200
+
+
+# ------------------ START ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    is_admin = user_id in ADMINS
+
     await update.message.reply_text(
-        "سلام 👋\nبه ربات کلینیک زیبایی تمارا خوش آمدید 🌸",
-        reply_markup=main_menu_keyboard(False)
+        f"سلام {update.effective_user.first_name} 🌸",
+        reply_markup=main_menu_keyboard(is_admin)
     )
 
 
-# ---------------------------
-#   CALLBACKS
-# ---------------------------
+# ------------------ CALLBACKS ------------------
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    data = query.data
     await query.answer()
 
-    data = query.data
-
-    # ---- Doctors ----
-    if data == "show_doctors":
-        doctors = get_doctors()
-        text = "👨‍⚕️ *پزشکان کلینیک*\n\n"
-        for d in doctors:
-            text += f"• {d[1]} — {d[2]}\n"
-        await query.edit_message_text(text, parse_mode="Markdown")
-        return
-
-    # ---- Services ----
-    if data == "show_services":
-        services = get_services()
-        text = "🧴 *لیست خدمات*\n\n"
-        for s in services:
-            text += f"• {s}\n"
-        await query.edit_message_text(text, parse_mode="Markdown")
-        return
-
-    # ---- Back ----
+    # ----- BACK -----
     if data == "back_main":
+        is_admin = query.from_user.id in ADMINS
         await query.edit_message_text(
             "منوی اصلی:",
-            reply_markup=main_menu_keyboard(False)
+            reply_markup=main_menu_keyboard(is_admin)
+        )
+        return
+
+    # ----- DOCTORS -----
+    if data == "doctors":
+        docs = get_doctors()
+        await query.edit_message_text(
+            "لیست پزشکان:",
+            reply_markup=doctors_keyboard(docs)
+        )
+        return
+
+    # ----- SERVICES -----
+    if data == "services":
+        items = get_services()
+        await query.edit_message_text(
+            "لیست خدمات:",
+            reply_markup=services_keyboard(items)
+        )
+        return
+
+    # ----- ABOUT -----
+    if data == "about":
+        await query.edit_message_text(
+            "کلینیک زیبایی تمارا\nبهترین خدمات زیبایی ✨",
+            reply_markup=main_menu_keyboard(query.from_user.id in ADMINS)
+        )
+        return
+
+    # ----- PAYMENT -----
+    if data == "pay_manual":
+        await query.edit_message_text(
+            card_to_card_text(),
+            reply_markup=payment_keyboard()
         )
         return
 
 
-# ---------------------------
-#   FLASK ENDPOINT
-# ---------------------------
+# ------------------ RUN BOT ------------------
 
-@app.post("/webhook")
-async def webhook():
-    """Telegram sends updates here"""
-    data = request.get_json(force=True)
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
-    return "OK", 200
+async def run_bot():
+    global tg_app
 
+    create_tables()
 
-# ---------------------------
-#   INIT BOT (NO POLLING)
-# ---------------------------
-
-async def init_bot():
-    global telegram_app
-
-    telegram_app = (
+    tg_app = (
         Application.builder()
         .token(BOT_TOKEN)
         .build()
     )
 
-    # Handlers
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CallbackQueryHandler(handle_callback))
-    telegram_app.add_handler(MessageHandler(filters.TEXT, start))
+    tg_app.add_handler(CommandHandler("start", start))
+    tg_app.add_handler(CallbackQueryHandler(callbacks))
 
-    # Set Webhook
-    webhook_url = os.getenv("RENDER_EXTERNAL_URL") + "/webhook"
+    # Set webhook
+    await tg_app.bot.set_webhook("https://tamana.onrender.com/webhook")
 
-    await telegram_app.bot.set_webhook(webhook_url)
-    print("Webhook set:", webhook_url)
-
-    return telegram_app
+    log.info("Bot is running (Webhook)...")
+    await tg_app.start()
+    await tg_app.updater.start_polling()  # required fix on render
 
 
-# ---------------------------
-# RUN APP (Render)
-# ---------------------------
+# ------------------ FLASK SERVER ------------------
+
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
+
+
+# ------------------ ENTRY ------------------
 
 if __name__ == "__main__":
-    print("🔥 Starting webhook bot...")
-
-    # اجرای bot در event loop مستقل
     loop = asyncio.get_event_loop()
-
-    loop.run_until_complete(init_bot())
-
-    # اجرای Flask (blocking)
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    loop.create_task(run_bot())
+    run_flask()
