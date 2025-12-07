@@ -1,22 +1,18 @@
-# ============================
-#        DATABASE.PY
-# ============================
-
 import sqlite3
 
 DB = "clinic.db"
 
 
-def get_conn():
-    return sqlite3.connect(DB)
+def connect():
+    return sqlite3.connect(DB, check_same_thread=False)
 
 
 def create_tables():
-    con = get_conn()
+    con = connect()
     cur = con.cursor()
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS doctors(
+        CREATE TABLE IF NOT EXISTS doctors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             specialty TEXT NOT NULL
@@ -24,14 +20,14 @@ def create_tables():
     """)
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS services(
+        CREATE TABLE IF NOT EXISTS services (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL
         )
     """)
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS appointments(
+        CREATE TABLE IF NOT EXISTS appointments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             full_name TEXT,
@@ -47,61 +43,59 @@ def create_tables():
     con.close()
 
 
-# -------- DOCTORS --------
-
 def add_doctor(name, specialty):
-    con = get_conn()
+    con = connect()
     cur = con.cursor()
     cur.execute("INSERT INTO doctors (name, specialty) VALUES (?, ?)", (name, specialty))
     con.commit()
     con.close()
 
 
-def get_doctors():
-    con = get_conn()
-    cur = con.cursor()
-    cur.execute("SELECT * FROM doctors")
-    data = cur.fetchall()
-    con.close()
-    return data
-
-
-# -------- SERVICES --------
-
 def add_service(name):
-    con = get_conn()
+    con = connect()
     cur = con.cursor()
     cur.execute("INSERT INTO services (name) VALUES (?)", (name,))
     con.commit()
     con.close()
 
 
-def get_services():
-    con = get_conn()
+def get_doctors():
+    con = connect()
     cur = con.cursor()
-    cur.execute("SELECT name FROM services")
+    cur.execute("SELECT * FROM doctors")
     rows = cur.fetchall()
     con.close()
-    return [r[0] for r in rows]
+    return rows
 
 
-# ---- APPOINTMENTS ----
+def get_services():
+    con = connect()
+    cur = con.cursor()
+    cur.execute("SELECT name FROM services")
+    rows = [r[0] for r in cur.fetchall()]
+    con.close()
+    return rows
 
-def add_appointment(user_id, full_name, doctor, service, date_greg, date_jalali, time):
-    con = get_conn()
+
+def add_appointment(data):
+    con = connect()
     cur = con.cursor()
     cur.execute("""
-        INSERT INTO appointments (user_id, full_name, doctor, service, date_greg, date_jalali, time)
+        INSERT INTO appointments
+        (user_id, full_name, doctor, service, date_greg, date_jalali, time)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (user_id, full_name, doctor, service, date_greg, date_jalali, time))
+    """, (
+        data["user_id"], data["full_name"], data["doctor"],
+        data["service"], data["date_greg"], data["date_jalali"], data["time"]
+    ))
     con.commit()
     con.close()
 
 
-def get_appointments_today(jalali_date):
-    con = get_conn()
+def get_appointments_today():
+    con = connect()
     cur = con.cursor()
-    cur.execute("SELECT * FROM appointments WHERE date_jalali = ?", (jalali_date,))
-    data = cur.fetchall()
+    cur.execute("SELECT * FROM appointments")
+    rows = cur.fetchall()
     con.close()
-    return data
+    return rows
