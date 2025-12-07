@@ -1,21 +1,18 @@
 # ===============================
-#       MAIN.PY — RENDER OK
+#     MAIN.PY — RENDER SAFE
 # ===============================
 
 import os
-import asyncio
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
-    Application,
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
     ContextTypes,
-    filters,
+    filters
 )
-from datetime import datetime
 
 from config import BOT_TOKEN, ADMINS, CLINIC_NAME, CLINIC_ADDRESS
 from utils import (
@@ -35,10 +32,14 @@ from database import (
     get_appointments_today
 )
 
+from datetime import datetime
+import asyncio
 
-# -----------------------------
-# Flask App
-# -----------------------------
+
+# ============================
+#   Flask
+# ============================
+
 flask_app = Flask(__name__)
 
 WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL")
@@ -46,18 +47,20 @@ if WEBHOOK_URL:
     WEBHOOK_URL = WEBHOOK_URL.rstrip("/") + "/webhook"
 
 
-# -----------------------------
-# Build Telegram Application
-# -----------------------------
-tg_app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+# ============================
+#   Telegram Application
+# ============================
+
+tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 
-# -----------------------------
-# Start Handler
-# -----------------------------
+# ============================
+#   Handlers
+# ============================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = update.effective_user.id in ADMINS
-
+    
     await update.message.reply_text(
         f"🌸 خوش آمدید به *{CLINIC_NAME}*\n\n"
         f"🏥 آدرس: {CLINIC_ADDRESS}\n\n"
@@ -67,13 +70,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# -----------------------------
-# Callback Handler
-# -----------------------------
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data
     await q.answer()
+
+    if data == "show_doctors":
+        await q.edit_message_text(
+            "👨‍⚕️ پزشکان:",
+            reply_markup=doctor_keyboard(get_doctors()),
+            parse_mode="Markdown"
+        )
+        return
+
+    if data == "show_services":
+        await q.edit_message_text(
+            "🧴 خدمات:",
+            reply_markup=services_keyboard(get_services()),
+            parse_mode="Markdown"
+        )
+        return
 
     if data == "back_main":
         await q.edit_message_text(
@@ -82,62 +98,44 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data == "show_doctors":
-        docs = get_doctors()
-        await q.edit_message_text(
-            "👨‍⚕️ *لیست پزشکان:*",
-            reply_markup=doctor_keyboard(docs),
-            parse_mode="Markdown"
-        )
-        return
 
-    if data == "show_services":
-        srv = get_services()
-        await q.edit_message_text(
-            "🧴 *خدمات کلینیک:*",
-            reply_markup=services_keyboard(srv),
-            parse_mode="Markdown"
-        )
-        return
-
-
-# -----------------------------
-# Photo Handler
-# -----------------------------
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("رسید دریافت شد. 🌸")
 
 
-# -----------------------------
-# Webhook Route
-# -----------------------------
+# ============================
+#   Webhook Endpoint
+# ============================
+
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, tg_app.bot)
-
-    # اجرای مستقیم update بدون create_task
-    asyncio.run(tg_app.process_update(update))
-
+    # اجرای امن در Render
+    asyncio.get_event_loop().create_task(tg_app.process_update(update))
     return "OK", 200
 
 
-# -----------------------------
-# Setup Function
-# -----------------------------
+# ============================
+#   Setup — Called Once
+# ============================
+
 async def setup():
     create_tables()
 
     if WEBHOOK_URL:
         await tg_app.bot.set_webhook(WEBHOOK_URL)
-        print("Webhook OK:", WEBHOOK_URL)
+        print("Webhook set to:", WEBHOOK_URL)
 
     tg_app.add_handler(CommandHandler("start", start))
     tg_app.add_handler(CallbackQueryHandler(handle_callback))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
 
-# -----------------------------
-# Entry Point — Render runs Flask automatically
-# -----------------------------
-asyncio.run(setup())
+# ============================
+#   ENTRY POINT
+# ============================
+
+# Render executes Flask automatically
+asyncio.get_event_loop().run_until_complete(setup())
+print("BOT READY (WEBHOOK MODE)")
